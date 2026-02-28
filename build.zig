@@ -27,7 +27,6 @@ fn createScript(
             .target = options.build_options.target,
             .optimize = options.build_options.optimize,
             .imports = &.{},
-            .sanitize_c = .off,
         }),
     });
 
@@ -48,6 +47,18 @@ fn createScript(
 
     run_cmd.step.dependOn(b.getInstallStep());
 
+    const exe_tests = b.addTest(.{
+        .root_module = exe.root_module,
+    });
+
+    const run_exe_tests = b.addRunArtifact(exe_tests);
+    const test_step = b.step(
+        b.fmt("test-{s}", .{options.name}),
+        b.fmt("Run test for {s}", .{options.name}),
+    );
+
+    test_step.dependOn(&run_exe_tests.step);
+
     return exe;
 }
 
@@ -59,6 +70,13 @@ fn createScript(
 //     exe.linkLibrary(dep.artifact("glfw"));
 //     // exe.root_module.addImport("glfw_zig", dep.module("glfw_zig"));
 // }
+fn addZMath(options: BuildOptions, exe: *std.Build.Step.Compile) void {
+    const zmath = options.b.dependency("zmath", .{
+        .target = options.target,
+        .optimize = options.optimize,
+    });
+    exe.root_module.addImport("zmath", zmath.module("root"));
+}
 
 fn addZGFLW(options: BuildOptions, exe: *std.Build.Step.Compile) void {
     const zglfw = options.b.dependency("zglfw", .{
@@ -101,7 +119,35 @@ pub fn build(b: *std.Build) void {
     _ = createScript(.{
         .build_options = defaultOptions,
         .name = "glfw-window",
-        .root_file = "playground/glfw-window/main.zig",
+        .root_file = "playground/glfw/window.zig",
         .dependencies = &[_]DependencySetup{ addZOpenGL, addZGFLW },
+    });
+
+    _ = createScript(.{
+        .build_options = defaultOptions,
+        .name = "glfw-triangle",
+        .root_file = "playground/glfw/triangle.zig",
+        .dependencies = &[_]DependencySetup{ addZOpenGL, addZGFLW },
+    });
+
+    _ = createScript(.{
+        .build_options = defaultOptions,
+        .name = "rotating-triangle",
+        .root_file = "playground/glfw/rotating-triangle.zig",
+        .dependencies = &[_]DependencySetup{ addZOpenGL, addZGFLW, addZMath },
+    });
+
+    _ = createScript(.{
+        .build_options = defaultOptions,
+        .name = "in-world",
+        .root_file = "playground/glfw/in-world.zig",
+        .dependencies = &[_]DependencySetup{ addZOpenGL, addZGFLW, addZMath },
+    });
+
+    _ = createScript(.{
+        .build_options = defaultOptions,
+        .name = "space-shooter",
+        .root_file = "playground/games/space-shooter/main.zig",
+        .dependencies = &[_]DependencySetup{ addZOpenGL, addZGFLW, addZMath },
     });
 }
