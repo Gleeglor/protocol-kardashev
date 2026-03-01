@@ -1,6 +1,7 @@
 const std = @import("std");
 const glfw = @import("zglfw");
 const zopengl = @import("zopengl");
+const zmath = @import("zmath");
 
 fn compileShader(source: []u8, kind: zopengl.wrapper.Enum) !zopengl.wrapper.Uint {
     const gl = zopengl.bindings;
@@ -52,3 +53,26 @@ pub fn createShaderProgram(vertex_shader_src: []u8, fragment_shader_src: []u8) !
 
     return prog;
 }
+
+pub const Camera = struct {
+    zoom: f32 = 10,
+    pos: [2]f32 = .{ 0, 0 },
+};
+
+pub const Vertex = struct {
+    x: f32,
+    y: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+};
+
+pub const Rectangle = struct {
+    vertices: [4]Vertex,
+    indices: [6]i32,
+};
+
+pub const InstanceData = struct {
+    mat: zmath.Mat,
+    color: [4]f32,
+};

@@ -1,5 +1,19 @@
 const std = @import("std");
 
+// Std
+test "std - random" {
+    var prng = std.rand.DefaultPrng.init(0xdeadbeef);
+    const random = prng.random();
+
+    const u = random.int(u32); // uniform u32
+    const f = random.float(f32); // [0,1)
+    const b = random.boolean(); // true/false
+
+    try std.testing.expect(@TypeOf(u32) == @TypeOf(u));
+    try std.testing.expect(@TypeOf(f32) == @TypeOf(f));
+    try std.testing.expect(@TypeOf(bool) == @TypeOf(b));
+}
+
 // Pointers
 test "pointers - single mutable pointer" {
     var x: i32 = 42;
