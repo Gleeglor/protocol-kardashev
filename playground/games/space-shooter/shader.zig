@@ -62,14 +62,15 @@ pub const Camera = struct {
 pub const Vertex = struct {
     x: f32,
     y: f32,
-    r: f32,
-    g: f32,
-    b: f32,
 };
 
 pub const Rectangle = struct {
     vertices: [4]Vertex,
     indices: [6]i32,
+};
+
+pub const Triangle = struct {
+    vertices: [3]Vertex,
 };
 
 pub const InstanceData = struct {
