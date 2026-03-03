@@ -73,7 +73,13 @@ pub const Triangle = struct {
     vertices: [3]Vertex,
 };
 
-pub const InstanceData = struct {
-    mat: zmath.Mat,
-    color: [4]f32,
+pub const RenderType = struct {
+    color: [4]f32 = [4]f32{ 1, 1, 1, 1 },
+    scale: f32 = 1,
+};
+
+pub const RenderData = struct {
+    pos: [2]f32 = [2]f32{ 0, 0 },
+    angle: f32 = 0,
+    type: u32 = 0,
 };

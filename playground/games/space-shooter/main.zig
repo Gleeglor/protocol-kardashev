@@ -11,6 +11,9 @@ const gl_version_major: u16 = 4;
 const gl_version_minor: u16 = 5;
 const allocator = std.heap.page_allocator;
 
+var global_arena: std.heap.ArenaAllocator = undefined;
+var frame_arena: std.heap.ArenaAllocator = undefined;
+
 var prng = std.Random.DefaultPrng.init(0xdeadbeef);
 const random = prng.random();
 
@@ -40,24 +43,18 @@ fn mouse_move_callback(_: *glfw.Window, xpos: f64, ypos: f64) callconv(.c) void 
     mouse.pos = .{ @floatCast(xpos), @floatCast(ypos) };
 }
 
-// fn getThisAndOther(i: u32) struct { this_value: f32, other: u32, level: u32 } {
-//     if (i == 0) return .{ .this_value = 0.0, .other = 0, .level = 0 };
+const BulletType = struct {
+    damage: f32,
+    scale: f32,
+};
 
-//     var remaining: u32 = i;
-//     var level: u32 = 1;
-
-//     while (true) {
-//         const group_size: u32 = math.pow(u32, level + 2, 2);
-
-//         if (remaining <= group_size) {
-//             const this_value = std.math.pow(f32, @as(f32, @floatFromInt(level)) + 2, 2);
-//             return .{ .this_value = this_value, .other = remaining, .level = level };
-//         }
-
-//         remaining -= group_size;
-//         level += 1;
-//     }
-// }
+const Object = struct {
+    acc: [2]f32 = .{ 0, 0 },
+    pos: [2]f32 = .{ 0, 0 },
+    vel: [2]f32 = .{ 0, 0 },
+    angle: f32 = 0,
+    render_type: u32 = 0,
+};
 
 pub fn main() !void {
     std.debug.print("Hello, glfw!\n", .{});
@@ -81,7 +78,14 @@ pub fn main() !void {
     glfw.makeContextCurrent(window);
     try zopengl.loadCoreProfile(glfw.getProcAddress, gl_version_major, gl_version_minor);
 
-    glfw.swapInterval(1);
+    glfw.swapInterval(6);
+
+    global_arena = std.heap.ArenaAllocator.init(allocator);
+    defer global_arena.deinit();
+
+    frame_arena = std.heap.ArenaAllocator.init(global_arena.allocator());
+    _ = frame_arena.reset(.retain_capacity);
+    const fa = frame_arena.allocator();
 
     // ── Shader setup ────────────────────────────────────────────────
     const vertex_shader: []u8 = try file.read_file("res/shaders/instanced-rendering.vert");
@@ -97,50 +101,45 @@ pub fn main() !void {
     // _ = glfw.setMouseButtonCallback(window, mouse_button_callback);
     _ = glfw.setCursorPosCallback(window, mouse_move_callback);
 
-    const Spaceship = struct {
-        pos: [2]f32 = .{ 0, 0 },
-        angle: f32 = 0,
-        vel: [2]f32 = .{ 0, 0 },
-        acc: [2]f32 = .{ 0, 0 },
-    };
+    var render_dataset: std.MultiArrayList(shader.RenderType) = std.MultiArrayList(shader.RenderType){};
+    defer render_dataset.deinit(fa);
 
-    var player: Spaceship = .{};
+    // Add atleast the default render type
+    _ = try render_dataset.append(fa, .{});
 
     const bullet_count = 5000;
-    var bullet_list = std.ArrayList(shader.InstanceData).empty;
-    defer bullet_list.deinit(allocator);
+    var bullet_dataset: std.MultiArrayList(Object) = std.MultiArrayList(Object){};
+    defer bullet_dataset.deinit(fa);
 
     const bullet_ratio = @sqrt(@as(f32, @floatFromInt(bullet_count))) * 4;
     var i: u32 = 0;
     while (i < bullet_count) : (i += 1) {
-        var mat = zmath.identity();
-        mat = zmath.mul(mat, zmath.translation(random.float(f32) * bullet_ratio - bullet_ratio / 2, random.float(f32) * bullet_ratio - bullet_ratio / 2, 0));
-        try bullet_list.append(allocator, .{
-            .mat = mat,
-            .color = .{ 1, 1, 1, 1 },
-        });
+        const x = random.float(f32) * bullet_ratio - bullet_ratio / 2;
+        const y = random.float(f32) * bullet_ratio - bullet_ratio / 2;
+        const bullet: Object = .{
+            .pos = .{ x, y },
+        };
+        _ = try bullet_dataset.append(fa, bullet);
     }
 
-    const spaceship_count = 5000;
-    var spaceship_list = std.ArrayList(shader.InstanceData).empty;
-    defer spaceship_list.deinit(allocator);
+    const spaceship_count = 5000000;
+    var spaceship_dataset = std.MultiArrayList(Object){};
+    try spaceship_dataset.ensureTotalCapacity(fa, spaceship_count);
+    defer spaceship_dataset.deinit(fa);
+    spaceship_dataset.len = spaceship_count;
+
+    const pos = spaceship_dataset.items(.pos); // assuming .pos = [2]f32 or Vec2 {x: f32, y: f32}
 
     const spaceship_ratio = @sqrt(@as(f32, @floatFromInt(spaceship_count))) * 4;
     i = 0;
     while (i < spaceship_count) : (i += 1) {
-        var mat = zmath.identity();
-        mat = zmath.mul(mat, zmath.translation(random.float(f32) * spaceship_ratio - spaceship_ratio / 2, random.float(f32) * spaceship_ratio - spaceship_ratio / 2, 0));
-        try spaceship_list.append(allocator, .{
-            .mat = mat,
-            .color = .{ 1, 1, 1, 1 },
-        });
+        pos[i] = .{
+            random.float(f32) * spaceship_ratio - spaceship_ratio / 2,
+            random.float(f32) * spaceship_ratio - spaceship_ratio / 2,
+        };
     }
 
-    const player_index = spaceship_list.items.len;
-    try spaceship_list.append(allocator, .{
-        .mat = zmath.identity(),
-        .color = .{ 1, 1, 1, 1 },
-    });
+    const player_index = 0; // try spaceship_dataset.addOne(allocator);
 
     const spaceship_rectangle = shader.Rectangle{
         .indices = .{ 0, 1, 3, 1, 2, 3 },
@@ -162,7 +161,9 @@ pub fn main() !void {
 
     var spaceship_vao: zopengl.wrapper.Uint = undefined; // header
     var spaceship_vbo: zopengl.wrapper.Uint = undefined; // body
-    var spaceship_ssbo: zopengl.wrapper.Uint = undefined;
+    var pos_ssbo: zopengl.wrapper.Uint = undefined;
+    var angle_ssbo: zopengl.wrapper.Uint = undefined;
+    var type_ssbo: zopengl.wrapper.Uint = undefined;
     var ebo: zopengl.wrapper.Uint = undefined;
     var bullet_vao: zopengl.wrapper.Uint = undefined; // header
     var bullet_vbo: zopengl.wrapper.Uint = undefined; // body
@@ -174,8 +175,14 @@ pub fn main() !void {
     gl.genBuffers(1, @ptrCast(&spaceship_vbo));
     defer gl.deleteBuffers(1, @ptrCast(&spaceship_vbo));
 
-    gl.genBuffers(1, @ptrCast(&spaceship_ssbo));
-    defer gl.deleteBuffers(1, @ptrCast(&spaceship_ssbo));
+    gl.genBuffers(1, @ptrCast(&pos_ssbo));
+    defer gl.deleteBuffers(1, @ptrCast(&pos_ssbo));
+
+    gl.genBuffers(1, @ptrCast(&angle_ssbo));
+    defer gl.deleteBuffers(1, @ptrCast(&angle_ssbo));
+
+    gl.genBuffers(1, @ptrCast(&type_ssbo));
+    defer gl.deleteBuffers(1, @ptrCast(&type_ssbo));
 
     gl.genBuffers(1, @ptrCast(&ebo));
     defer gl.deleteBuffers(1, @ptrCast(&ebo));
@@ -191,6 +198,10 @@ pub fn main() !void {
 
     gl.bindVertexArray(spaceship_vao);
 
+    gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, 0, pos_ssbo);
+    gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, 1, angle_ssbo);
+    gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, 2, type_ssbo);
+
     gl.bindBuffer(gl.ARRAY_BUFFER, spaceship_vbo);
     gl.bufferData(gl.ARRAY_BUFFER, @sizeOf(@TypeOf(spaceship_rectangle.vertices)), &spaceship_rectangle.vertices, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
@@ -198,9 +209,6 @@ pub fn main() !void {
 
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, @sizeOf(@TypeOf(spaceship_rectangle.indices)), &spaceship_rectangle.indices, gl.STATIC_DRAW);
-
-    gl.bindBuffer(gl.SHADER_STORAGE_BUFFER, spaceship_ssbo);
-    gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, 2, spaceship_ssbo);
 
     gl.bindVertexArray(bullet_vao);
 
@@ -230,47 +238,42 @@ pub fn main() !void {
 
         const zoom = camera.zoom * std.math.pow(f32, 2.0, @floatCast(-mouse.scroll[1] * 0.3));
 
-        player = player;
-        camera = camera;
-
+        var player_entity = spaceship_dataset.get(player_index);
         if (glfw.getKey(window, glfw.Key.w) != glfw.Action.release) {
-            const sincos = zmath.sincos(player.angle);
-            player.acc[0] += sincos[0] * 0.06;
-            player.acc[1] += sincos[1] * 0.06;
+            const sincos = zmath.sincos(player_entity.angle);
+            player_entity.acc[0] += sincos[0] * 0.06;
+            player_entity.acc[1] += sincos[1] * 0.06;
         }
 
         if (glfw.getKey(window, glfw.Key.s) != glfw.Action.release) {
-            const sincos = zmath.sincos(player.angle);
-            player.acc[0] -= sincos[0] * 0.1;
-            player.acc[1] -= sincos[1] * 0.1;
+            const sincos = zmath.sincos(player_entity.angle);
+            player_entity.acc[0] -= sincos[0] * 0.1;
+            player_entity.acc[1] -= sincos[1] * 0.1;
         }
 
         if (glfw.getKey(window, glfw.Key.a) != glfw.Action.release) {
-            player.angle -= 0.05;
+            player_entity.angle = player_entity.angle - 0.05;
         }
 
         if (glfw.getKey(window, glfw.Key.d) != glfw.Action.release) {
-            player.angle += 0.05;
+            player_entity.angle = player_entity.angle + 0.05;
         }
 
-        player.vel[0] += player.acc[0];
-        player.vel[1] += player.acc[1];
+        player_entity.vel[0] += player_entity.acc[0];
+        player_entity.vel[1] += player_entity.acc[1];
 
-        player.acc[0] = 0;
-        player.acc[1] = 0;
+        player_entity.acc[0] = 0;
+        player_entity.acc[1] = 0;
 
-        player.pos[0] += player.vel[0];
-        player.pos[1] += player.vel[1];
+        player_entity.pos[0] += player_entity.vel[0];
+        player_entity.pos[1] += player_entity.vel[1];
 
-        player.vel[0] *= 0.93;
-        player.vel[1] *= 0.93;
+        player_entity.vel[0] *= 0.93;
+        player_entity.vel[1] *= 0.93;
 
-        var mat = zmath.identity();
-        mat = zmath.mul(mat, zmath.rotationZ(-player.angle));
-        mat = zmath.mul(mat, zmath.translation(player.pos[0], player.pos[1], 0));
-        spaceship_list.items[player_index].mat = mat;
+        spaceship_dataset.set(player_index, player_entity);
 
-        camera.pos = player.pos;
+        camera.pos = player_entity.pos;
         view = zmath.mul(view, zmath.translation(-camera.pos[0], -camera.pos[1], -zoom));
         projection = zmath.mul(projection, zmath.perspectiveFovRhGl(math.degreesToRadians(45), aspect_ratio, 0.001, 10000));
 
@@ -280,11 +283,34 @@ pub fn main() !void {
         gl.bindVertexArray(spaceship_vao);
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
 
-        // Spaceship
+        const n = spaceship_dataset.len;
+        const sd_slice = spaceship_dataset.slice();
+
+        for (pos) |*p| {
+            p[0] += 0.1;
+        }
+
+        gl.bindBuffer(gl.SHADER_STORAGE_BUFFER, pos_ssbo);
         gl.bufferData(
             gl.SHADER_STORAGE_BUFFER,
-            @sizeOf(shader.InstanceData) * @as(i32, @intCast(spaceship_list.items.len)),
-            spaceship_list.items.ptr,
+            @sizeOf([2]f32) * @as(i32, @intCast(n)),
+            sd_slice.items(.pos).ptr,
+            gl.DYNAMIC_DRAW,
+        );
+
+        gl.bindBuffer(gl.SHADER_STORAGE_BUFFER, angle_ssbo);
+        gl.bufferData(
+            gl.SHADER_STORAGE_BUFFER,
+            @sizeOf(f32) * @as(i32, @intCast(n)),
+            sd_slice.items(.angle).ptr,
+            gl.DYNAMIC_DRAW,
+        );
+
+        gl.bindBuffer(gl.SHADER_STORAGE_BUFFER, type_ssbo);
+        gl.bufferData(
+            gl.SHADER_STORAGE_BUFFER,
+            @sizeOf(u32) * @as(i32, @intCast(n)),
+            sd_slice.items(.render_type).ptr,
             gl.DYNAMIC_DRAW,
         );
 
@@ -293,35 +319,29 @@ pub fn main() !void {
             6,
             gl.UNSIGNED_INT,
             @ptrFromInt(0),
-            @as(i32, @intCast(spaceship_list.items.len)),
+            @as(i32, @intCast(1)),
         );
 
-        // Bullets
-        for (bullet_list.items, 0..) |*bullet, index| {
-            const pos_x = bullet.mat[3][0];
-            const pos_y = bullet.mat[3][1];
-            var trans = zmath.translation(pos_x, pos_y, 0);
-            const rot = zmath.rotationZ(@as(f32, @floatCast(glfw.getTime() * 10)) + @as(f32, @floatFromInt(index)));
-            const scale = zmath.scalingV([_]f32{0.2} ** 4);
-            trans = zmath.mul(scale, trans);
-            bullet.mat = zmath.mul(rot, trans);
-        }
+        // // Bullets
+        // for (bullet_list.items, 0..) |*bullet, index| {
+        //     bullet.angle = @as(f32, @floatCast(glfw.getTime() * 10)) + @as(f32, @floatFromInt(index));
+        // }
 
-        gl.bindVertexArray(bullet_vao);
+        // gl.bindVertexArray(bullet_vao);
 
-        gl.bufferData(
-            gl.SHADER_STORAGE_BUFFER,
-            @sizeOf(shader.InstanceData) * @as(i32, @intCast(bullet_list.items.len)),
-            bullet_list.items.ptr,
-            gl.DYNAMIC_DRAW,
-        );
+        // gl.bufferData(
+        //     gl.SHADER_STORAGE_BUFFER,
+        //     @sizeOf(shader.RenderData) * @as(i32, @intCast(bullet_list.items.len)),
+        //     bullet_list.items.ptr,
+        //     gl.DYNAMIC_DRAW,
+        // );
 
-        gl.drawArraysInstanced(
-            gl.TRIANGLES,
-            0,
-            3,
-            @as(i32, @intCast(bullet_list.items.len)),
-        );
+        // gl.drawArraysInstanced(
+        //     gl.TRIANGLES,
+        //     0,
+        //     3,
+        //     @as(i32, @intCast(bullet_list.items.len)),
+        // );
 
         gl.bindVertexArray(0);
 
