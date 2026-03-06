@@ -121,11 +121,11 @@ const InstancedCollection = struct {
     angle_ssbo: zopengl.wrapper.Uint = undefined,
     type_ssbo: zopengl.wrapper.Uint = undefined,
 
-    pub fn init(self: *InstancedCollection, alloc: std.mem.Allocator, count: u32, shape: shader.Shape) !void {
+    pub fn init(self: *InstancedCollection, alloc: std.mem.Allocator, count: u32, shape: *const shader.Shape) !void {
         _ = try self.list.ensureTotalCapacity(alloc, count);
         self.list.len = count;
 
-        self.shape = &shape;
+        self.shape = shape;
 
         gl.genVertexArrays(1, @ptrCast(&self.vao));
         gl.genBuffers(1, @ptrCast(&self.vbo));
@@ -160,6 +160,9 @@ const InstancedCollection = struct {
         gl.enableVertexAttribArray(0);
 
         const indices_count = self.shape.indices.len;
+
+        // std.debug.print("{d}, {d}\n", .{ self.shape.indices.ptr[0], 0 });
+
         if (indices_count != 0) {
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, self.ebo);
             gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, @intCast(@sizeOf(u32) * indices_count), self.shape.indices.ptr, gl.STATIC_DRAW);
@@ -226,7 +229,7 @@ pub fn main() !void {
     {
         const bullet_collection = &collection_pool.list.items[bullet_collection_idx];
         const bullet_count: u32 = 0;
-        _ = try bullet_collection.init(fa, bullet_count, bullet_shape);
+        _ = try bullet_collection.init(fa, bullet_count, &bullet_shape);
 
         const pos: [][2]f32 = bullet_collection.list.items(.pos);
         const bullet_ratio = @sqrt(@as(f32, @floatFromInt(bullet_count))) * 4;
@@ -243,7 +246,7 @@ pub fn main() !void {
     {
         const boid_collection = &collection_pool.list.items[boid_collection_idx];
         const boid_count: u32 = 100000;
-        _ = try boid_collection.init(fa, boid_count, spaceship_shape);
+        _ = try boid_collection.init(fa, boid_count, &spaceship_shape);
 
         const pos: [][2]f32 = boid_collection.list.items(.pos); // assuming .pos = [2]f32 or Vec2 {x: f32, y: f32}
         const spaceship_ratio = @sqrt(@as(f32, @floatFromInt(boid_count))) * 4;
@@ -259,7 +262,7 @@ pub fn main() !void {
     const player_collection_idx: usize = try collection_pool.create(fa);
     {
         const player_collection = &collection_pool.list.items[player_collection_idx];
-        _ = try player_collection.init(fa, 0, spaceship_shape);
+        _ = try player_collection.init(fa, 0, &spaceship_shape);
         _ = try player_collection.list.append(fa, .{});
     }
 
