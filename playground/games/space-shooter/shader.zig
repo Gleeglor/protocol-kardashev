@@ -64,14 +64,24 @@ pub const Vertex = struct {
     y: f32,
 };
 
-pub const Rectangle = struct {
-    vertices: [4]Vertex,
-    indices: [6]i32,
+pub const Shape = struct {
+    vertices: []const Vertex,
+    indices: []const u32,
 };
 
-pub const Triangle = struct {
-    vertices: [3]Vertex,
+pub const DrawMode = enum(u8) {
+    normal = 0,
+    points = 1,
 };
+
+// pub const Rectangle = struct {
+//     vertices: [4]Vertex,
+//     indices: [6]i32,
+// };
+
+// pub const Triangle = struct {
+//     vertices: [3]Vertex,
+// };
 
 pub const RenderType = struct {
     color: [4]f32 = [4]f32{ 1, 1, 1, 1 },
